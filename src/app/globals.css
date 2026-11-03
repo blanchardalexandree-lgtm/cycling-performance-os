@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/* Identité visuelle : sombre, sobre, accent « lime signal ». */
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+  --color-bg: #0b0c0d;
+  --color-surface: #131416;
+  --color-surface-2: #1a1b1e;
+  --color-line: #26282c;
+  --color-line-strong: #34373c;
+  --color-ink: #f0efec;
+  --color-ink-2: #b9b8b2;
+  --color-ink-3: #85847f;
+  --color-accent: #c8f03c;
+  --color-accent-ink: #11140a;
+
+  /* Séries de données (palette catégorielle validée, pas d'usage décoratif) */
+  --color-s1: #3987e5;
+  --color-s2: #d95926;
+  --color-s3: #199e70;
+  --color-s4: #c98500;
+  --color-s7: #9085e9;
+
+  /* Statuts (réservés) */
+  --color-good: #3fb97b;
+  --color-warn: #e0a526;
+  --color-bad: #e66767;
+
+  /* Types de séance */
+  --color-k-recup: #4b5563;
+  --color-k-endurance: #3987e5;
+  --color-k-tempo: #199e70;
+  --color-k-seuil: #c98500;
+  --color-k-vo2: #d95926;
+  --color-k-anaerobie: #e66767;
+  --color-k-clm: #9085e9;
+  --color-k-race: #c8f03c;
+}
+
+:root { color-scheme: dark; }
+html, body { background: var(--color-bg); color: var(--color-ink); }
+body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; font-feature-settings: "tnum" 1, "cv11" 1; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+::selection { background: var(--color-accent); color: var(--color-accent-ink); }
+*:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: 4px; }
+
+@utility card { @apply rounded-xl border border-line bg-surface; }
+@utility card-pad { @apply p-4 sm:p-5; }
+@utility label { @apply text-[11px] font-medium uppercase tracking-[0.08em] text-ink-3; }
+@utility btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50; }
+@utility btn-primary { @apply btn bg-accent text-accent-ink hover:brightness-110; }
+@utility btn-ghost { @apply btn border border-line-strong text-ink hover:bg-surface-2; }
+@utility btn-danger { @apply btn border border-bad/50 text-bad hover:bg-bad/10; }
+@utility input { @apply w-full rounded-lg border border-line-strong bg-bg px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none; }
+@utility chip { @apply inline-flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-[11px] font-medium text-ink-2; }
+
+.table { @apply w-full text-sm; }
+.table th { @apply label py-2 pr-3 text-left font-medium; }
+.table td { @apply border-t border-line py-2 pr-3 align-top; }

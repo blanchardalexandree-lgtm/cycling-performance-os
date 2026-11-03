@@ -1,0 +1,418 @@
+// Cycling Performance OS — schéma de données
+// Toutes les tables métier portent userId : isolation stricte par utilisateur.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DataOrigin {
+  MEASURED   // mesure réelle (test, capteur)
+  ESTIMATED  // estimation calculée par l'application
+  DECLARED   // saisie par l'utilisateur
+  ASSUMED    // hypothèse par défaut, à confirmer
+}
+
+enum ActivitySource {
+  FILE_FIT
+  FILE_GPX
+  FILE_TCX
+  STRAVA
+  GARMIN
+  NOLIO
+  MANUAL
+}
+
+enum WorkoutStatus {
+  PLANNED
+  COMPLETED
+  PARTIAL
+  MISSED
+  SKIPPED
+}
+
+enum DayRole {
+  TRAINING
+  ACTIVE_RECOVERY
+  RACE
+  TEST
+  OFF
+}
+
+enum GoalPriority {
+  A
+  B
+  C
+}
+
+enum ProposalStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  timezone     String   @default("Europe/Paris")
+
+  sessions      Session[]
+  profile       AthleteProfile?
+  metrics       MetricValue[]
+  activities    Activity[]
+  goals         Goal[]
+  workouts      PlannedWorkout[]
+  constraints   CalendarConstraint[]
+  availability  WeeklyAvailability[]
+  integrations  IntegrationAccount[]
+  syncLogs      SyncLog[]
+  wellness      WellnessEntry[]
+  proposals     PlanProposal[]
+  phases        TrainingPhase[]
+  coachMessages CoachMessage[]
+  settings      UserSettings?
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  userAgent  String?
+
+  @@index([userId])
+}
+
+model AthleteProfile {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  discipline     String   @default("Cyclisme sur route")
+  level          String   @default("Haut niveau amateur — division nationale")
+  specialties    String[]
+  heightCm       Float?
+  generalGoal    String?
+  constraints    String?
+  environment    String[]
+  equipment      String[]
+  birthYear      Int?
+  sex            String?
+  updatedAt      DateTime @updatedAt
+}
+
+/// Une valeur physiologique ou de référence, historisée, avec provenance.
+/// key : FTP, CP, W_PRIME, PMA, HR_MAX, HR_REST, LTHR, WEIGHT, MMP_5S, MMP_20MIN...
+model MetricValue {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key         String
+  value       Float
+  unit        String
+  date        DateTime
+  origin      DataOrigin
+  source      String     // "saisie", "test 20 min", "modèle CP 2 paramètres", "fichier FIT"...
+  method      String?    // méthode de calcul / protocole
+  uncertainty Float?     // ± même unité
+  activityId  String?
+  activity    Activity?  @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  note        String?
+  createdAt   DateTime   @default(now())
+
+  @@index([userId, key, date])
+}
+
+/// Activité canonique (une seule par effort réel, même si plusieurs sources).
+model Activity {
+  id              String     @id @default(cuid())
+  userId          String
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  sport           String     @default("cycling")
+  startTime       DateTime
+  timezone        String?
+  durationS       Int        // temps en mouvement si connu, sinon temps écoulé
+  elapsedS        Int?
+  distanceM       Float?
+  elevationGainM  Float?
+  avgPower        Float?
+  normalizedPower Float?
+  maxPower        Float?
+  avgHr           Float?
+  maxHr           Float?
+  avgCadence      Float?
+  avgSpeed        Float?     // m/s
+  work_kJ         Float?
+  tss             Float?     // null si pas de référence fiable
+  intensityFactor Float?
+  tssMethod       String?    // "puissance (NP/FTP)", "FC (hrTSS)", null
+  hrDriftPct      Float?
+  isRace          Boolean    @default(false)
+  isIndoor        Boolean    @default(false)
+  rpe             Int?
+  notes           String?
+  hasPower        Boolean    @default(false)
+  hasHr           Boolean    @default(false)
+  powerSensorId   String?    // pour éviter de comparer des capteurs différents
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  sources         ActivitySourceRecord[]
+  stream          ActivityStream?
+  bests           PowerBest[]
+  metrics         MetricValue[]
+  matchedWorkout  PlannedWorkout? @relation("WorkoutActivity")
+
+  @@index([userId, startTime])
+}
+
+/// Lien vers chaque source d'une activité canonique (identifiant officiel = anti-doublon).
+model ActivitySourceRecord {
+  id          String         @id @default(cuid())
+  activityId  String
+  activity    Activity       @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  userId      String
+  source      ActivitySource
+  externalId  String         // id Strava, id Garmin, hash SHA-256 du fichier
+  importedAt  DateTime       @default(now())
+  raw         Json?          // résumé brut minimal (pas de flux)
+  /// Données soumises à des règles de rétention / d'usage (ex. Strava : pas d'usage IA)
+  restricted  Boolean        @default(false)
+
+  @@unique([userId, source, externalId])
+  @@index([activityId])
+}
+
+/// Flux échantillonnés à 1 Hz (tableaux compacts).
+model ActivityStream {
+  activityId String   @id
+  activity   Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  time       Int[]
+  power      Int[]
+  heartRate  Int[]
+  cadence    Int[]
+  speed      Float[]
+  altitude   Float[]
+  distance   Float[]
+  lat        Float[]
+  lng        Float[]
+}
+
+/// Meilleure puissance moyenne d'une activité pour une durée donnée.
+model PowerBest {
+  id         String   @id @default(cuid())
+  userId     String
+  activityId String
+  activity   Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  durationS  Int
+  watts      Float
+  date       DateTime
+  isRace     Boolean  @default(false)
+
+  @@unique([activityId, durationS])
+  @@index([userId, durationS, watts])
+}
+
+model Goal {
+  id               String       @id @default(cuid())
+  userId           String
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name             String
+  date             DateTime
+  endDate          DateTime?
+  discipline       String       @default("Route")
+  kind             String       @default("course") // course, clm, étapes, stage, objectif-puissance
+  priority         GoalPriority @default(C)
+  distanceKm       Float?
+  elevationM       Float?
+  courseType       String?
+  targetResult     String?
+  demands          String[]     // ex. "seuil", "PMA", "répétition d'efforts"
+  readiness        String?
+  logistics        String?
+  confirmed        Boolean      @default(true)
+  resultRank       String?
+  resultNotes      String?
+  activityId       String?
+  createdAt        DateTime     @default(now())
+
+  @@index([userId, date])
+}
+
+model TrainingPhase {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  kind      String   // general, development, specific, competition, taper, transition, recovery
+  start     DateTime
+  end       DateTime
+  focus     String?
+  goalId    String?
+
+  @@index([userId, start])
+}
+
+/// Séance planifiée. steps = format interne standardisé (cf. src/lib/planning/types.ts).
+model PlannedWorkout {
+  id              String        @id @default(cuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date            DateTime      @db.Date
+  dayRole         DayRole       @default(TRAINING)
+  cycleIndex      Int?          // position dans le cycle 3+1 (1..4)
+  title           String
+  category        String        // endurance, tempo, sweetspot, seuil, vo2, pma, sprint, clm, recuperation...
+  objective       String
+  rationale       String?
+  priority        Int           @default(2) // 1 clé, 2 normal, 3 optionnel
+  durationMin     Int
+  plannedTss      Float?
+  steps           Json
+  indoor          Boolean       @default(false)
+  status          WorkoutStatus @default(PLANNED)
+  locked          Boolean       @default(false) // validé : jamais modifié silencieusement
+  generatedBy     String        @default("planner") // planner, user, coach
+  activityId      String?       @unique
+  activity        Activity?     @relation("WorkoutActivity", fields: [activityId], references: [id], onDelete: SetNull)
+  compliance      Json?
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([userId, date])
+}
+
+/// Contraintes de vie : cours, examens, stages, déplacements, travail.
+model CalendarConstraint {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind         String   // cours, examen, stage, deplacement, travail, autre
+  title        String
+  start        DateTime
+  end          DateTime
+  maxTrainingMin Int?   // temps d'entraînement max ce(s) jour(s)
+  indoorOnly   Boolean  @default(false)
+  noTraining   Boolean  @default(false)
+
+  @@index([userId, start])
+}
+
+/// Disponibilité type par jour de semaine (0 = lundi).
+model WeeklyAvailability {
+  id          String  @id @default(cuid())
+  userId      String
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weekday     Int
+  maxMinutes  Int
+  outdoorOk   Boolean @default(true)
+
+  @@unique([userId, weekday])
+}
+
+model IntegrationAccount {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider       String    // strava, garmin, nolio
+  externalUserId String?
+  accessTokenEnc String?   // AES-256-GCM
+  refreshTokenEnc String?
+  expiresAt      DateTime?
+  scopes         String[]
+  status         String    @default("connected") // connected, revoked, error
+  lastSyncAt     DateTime?
+  syncCursor     String?   // ex. epoch de la dernière activité Strava importée
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([userId, provider])
+}
+
+model SyncLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider   String
+  startedAt  DateTime @default(now())
+  finishedAt DateTime?
+  status     String   // running, success, partial, error
+  imported   Int      @default(0)
+  merged     Int      @default(0)
+  skipped    Int      @default(0)
+  message    String?
+
+  @@index([userId, startedAt])
+}
+
+model WellnessEntry {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date         DateTime @db.Date
+  source       String   @default("saisie")
+  sleepHours   Float?
+  sleepQuality Int?     // 1-5
+  hrvMs        Float?   // rMSSD
+  restingHr    Float?
+  fatigue      Int?     // 1-5 (5 = très fatigué)
+  soreness     Int?     // 1-5
+  motivation   Int?     // 1-5
+  stress       Int?     // 1-5
+  illness      Boolean  @default(false)
+  pain         String?
+  weightKg     Float?
+  notes        String?
+
+  @@unique([userId, date, source])
+}
+
+/// Modification de plan proposée (par le moteur ou le coach IA), jamais appliquée sans validation.
+model PlanProposal {
+  id          String         @id @default(cuid())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime       @default(now())
+  author      String         // adaptation-engine, coach-ia
+  title       String
+  rationale   String
+  evidence    Json           // indicateurs observés ayant motivé la proposition
+  changes     Json           // liste d'opérations (cf. src/lib/planning/proposals.ts)
+  status      ProposalStatus @default(PENDING)
+  decidedAt   DateTime?
+
+  @@index([userId, status])
+}
+
+model CoachMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   // user, assistant
+  content   String
+  mode      String   // live, demo
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model UserSettings {
+  userId              String  @id
+  user                User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cycleAnchorDate     DateTime? @db.Date // date du jour 1 d'un cycle de référence
+  autoAdaptEnabled    Boolean @default(false)
+  autoAdaptRules      Json?
+  shareStravaWithAi   Boolean @default(false)
+  preferredExport     String  @default("zwo")
+}
