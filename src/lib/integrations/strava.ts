@@ -161,7 +161,7 @@ async function api<T>(token: string, path: string): Promise<{ data: T; rate: Rat
   const rate = parseRateLimit(res.headers);
   if (res.status === 429) throw new StravaError("Quota Strava atteint : la synchronisation reprendra plus tard.", 429);
   if (res.status === 401) throw new StravaError("Jeton Strava refusé : reconnecter le compte.", 401);
-  if (!res.ok) throw new StravaError(`Erreur API Strava ${res.status}`, res.status);
+  if (!res.ok) throw new StravaError(`Erreur API Strava ${res.status} (${path.split("?")[0]})`, res.status);
   return { data: (await res.json()) as T, rate };
 }
 
@@ -196,16 +196,28 @@ export async function syncStrava(userId: string, opts: { historyDays?: number; o
       const known = await prisma.activitySourceRecord.findUnique({ where: { userId_source_externalId: { userId, source: "STRAVA", externalId: String(a.id) } } });
       if (known) { skipped++; cursor = Math.max(cursor, Date.parse(a.start_date) / 1000); continue; }
       if (streamCalls >= MAX_STREAM_CALLS_PER_SYNC) { status = "partial"; message = `Limite de ${MAX_STREAM_CALLS_PER_SYNC} activités détaillées par synchronisation atteinte : relancer plus tard.`; break; }
-      const s = await api<StreamSet>(token, `/activities/${a.id}/streams?keys=${STREAM_KEYS}&key_by_type=true`);
+      // Une activité sans flux (saisie manuelle, flux indisponible → 404) est importée avec son résumé seul ;
+      // une erreur sur une activité n'interrompt pas toute la synchronisation (sauf quota / jeton).
+      let s: { data: StreamSet | null; rate: RateLimitState | null } = { data: null, rate: null };
+      try {
+        s = await api<StreamSet>(token, `/activities/${a.id}/streams?keys=${STREAM_KEYS}&key_by_type=true`);
+      } catch (e) {
+        if (!(e instanceof StravaError) || (e.status !== 404 && e.status !== 403)) throw e;
+      }
       streamCalls++;
-      const parsed = mapStravaActivity(a, s.data);
-      const res = await ingestActivity({
-        userId, source: "STRAVA", externalId: String(a.id), parsed, restricted: true, isRace: a.workout_type === 11,
-        raw: { id: a.id, name: a.name, type: sport, start_date: a.start_date, workout_type: a.workout_type ?? null },
-      });
-      if (res.status === "created") imported++; else if (res.status === "merged") merged++; else skipped++;
+      try {
+        const parsed = mapStravaActivity(a, s.data);
+        const res = await ingestActivity({
+          userId, source: "STRAVA", externalId: String(a.id), parsed, restricted: true, isRace: a.workout_type === 11,
+          raw: { id: a.id, name: a.name, type: sport, start_date: a.start_date, workout_type: a.workout_type ?? null },
+        });
+        if (res.status === "created") imported++; else if (res.status === "merged") merged++; else skipped++;
+      } catch (e) {
+        skipped++;
+        console.error("strava ingest", a.id, e instanceof Error ? e.message : "");
+      }
       cursor = Math.max(cursor, Date.parse(a.start_date) / 1000);
-      if (nearLimit(s.rate)) { status = "partial"; message = "Quota Strava presque atteint : synchronisation interrompue proprement."; break; }
+      if (s.rate && nearLimit(s.rate)) { status = "partial"; message = "Quota Strava presque atteint : synchronisation interrompue proprement."; break; }
     }
     await prisma.integrationAccount.update({ where: { id: acc.id }, data: { lastSyncAt: new Date(), syncCursor: String(Math.floor(cursor)), lastError: null } });
   } catch (e) {
