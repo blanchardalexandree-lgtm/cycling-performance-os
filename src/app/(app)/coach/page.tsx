@@ -4,6 +4,7 @@ import { PageHeader, Notice } from "@/components/ui";
 import { coachEnabled } from "@/lib/coach/coach";
 import { CoachChat } from "./chat";
 
+export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 export default async function Coach() {

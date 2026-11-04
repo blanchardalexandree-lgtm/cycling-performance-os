@@ -16,11 +16,24 @@ export function Upload() {
   async function send(files: FileList | null) {
     if (!files?.length) return;
     setBusy(true);
-    const fd = new FormData();
-    for (const f of Array.from(files)) fd.append("files", f);
-    const res = await fetch("/api/activities/import", { method: "POST", body: fd });
-    const j = await res.json().catch(() => ({ error: "Réponse invalide" }));
-    setResults(j.results ?? [{ file: "—", status: "error", reason: j.error }]);
+    // Envoi par lots de ~3,5 Mo (limite de taille des requêtes chez les hébergeurs serverless).
+    const batches: File[][] = [];
+    let cur: File[] = [], size = 0;
+    for (const f of Array.from(files)) {
+      if (cur.length && size + f.size > 3.5e6) { batches.push(cur); cur = []; size = 0; }
+      cur.push(f); size += f.size;
+    }
+    if (cur.length) batches.push(cur);
+    const all: R[] = [];
+    setResults([]);
+    for (const b of batches) {
+      const fd = new FormData();
+      for (const f of b) fd.append("files", f);
+      const res = await fetch("/api/activities/import", { method: "POST", body: fd }).catch(() => null);
+      const j = res ? await res.json().catch(() => ({ error: res.status === 413 ? "Fichier trop volumineux pour l'hébergeur" : "Réponse invalide" })) : { error: "Réseau indisponible" };
+      all.push(...(j.results ?? b.map((f) => ({ file: f.name, status: "error", reason: j.error }))));
+      setResults([...all]);
+    }
     setBusy(false);
     router.refresh();
   }

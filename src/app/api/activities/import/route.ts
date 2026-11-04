@@ -6,6 +6,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { sameOrigin } from "@/lib/http";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 const MAX_BYTES = 40 * 1024 * 1024;
 const MAX_FILES = 50;
 
@@ -14,7 +15,7 @@ export async function POST(req: Request) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   if (!sameOrigin(req)) return NextResponse.json({ error: "Origine refusée" }, { status: 403 });
-  if (!rateLimit(`import:${user.id}`, 30, 15 * 60_000)) return NextResponse.json({ error: "Trop d'imports rapprochés" }, { status: 429 });
+  if (!rateLimit(`import:${user.id}`, 200, 15 * 60_000)) return NextResponse.json({ error: "Trop d'imports rapprochés" }, { status: 429 });
   const form = await req.formData();
   const files = form.getAll("files").filter((f): f is File => f instanceof File).slice(0, MAX_FILES);
   if (!files.length) return NextResponse.json({ error: "Aucun fichier" }, { status: 400 });
