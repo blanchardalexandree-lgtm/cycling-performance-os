@@ -8,6 +8,7 @@ import { garminDisconnect, stravaDisconnectAction, stravaSyncAction } from "../a
 import { GarminKeyForm } from "./garmin-form";
 import { fmtDate } from "@/lib/format";
 
+export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 const BADGE: Record<string, [string, string]> = {

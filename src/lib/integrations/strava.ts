@@ -30,10 +30,10 @@ export function stravaConfigured(): boolean {
   return Boolean(process.env.STRAVA_CLIENT_ID && process.env.STRAVA_CLIENT_SECRET);
 }
 
-export function buildAuthorizeUrl(state: string): string {
+export function buildAuthorizeUrl(state: string, origin?: string): string {
   const u = new URL(AUTH_URL);
   u.searchParams.set("client_id", process.env.STRAVA_CLIENT_ID!);
-  u.searchParams.set("redirect_uri", `${process.env.APP_URL}/api/integrations/strava/callback`);
+  u.searchParams.set("redirect_uri", `${(origin ?? process.env.APP_URL ?? "").replace(/\/+$/, "")}/api/integrations/strava/callback`);
   u.searchParams.set("response_type", "code");
   u.searchParams.set("approval_prompt", "auto");
   u.searchParams.set("scope", STRAVA_SCOPES.join(","));
